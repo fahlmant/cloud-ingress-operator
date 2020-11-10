@@ -3,6 +3,7 @@ package publishingstrategy
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
@@ -270,7 +271,7 @@ func validateStaticStatus(ingressController operatorv1.IngressController, desire
 	if !(desiredSpec.Domain == ingressController.Status.Domain) {
 		return false
 	}
-	if !(desiredSpec.EndpointPublishingStrategy == ingressController.Status.EndpointPublishingStrategy) {
+	if !(desiredSpec.EndpointPublishingStrategy.LoadBalancer.Scope == ingressController.Status.EndpointPublishingStrategy.LoadBalancer.Scope) {
 		return false
 	}
 
@@ -281,7 +282,7 @@ func validateStaticSpec(ingressController operatorv1.IngressController, desiredS
 	if !(desiredSpec.Domain == ingressController.Spec.Domain) {
 		return false
 	}
-	if !(desiredSpec.EndpointPublishingStrategy == ingressController.Spec.EndpointPublishingStrategy) {
+	if !(desiredSpec.EndpointPublishingStrategy.LoadBalancer.Scope == ingressController.Spec.EndpointPublishingStrategy.LoadBalancer.Scope) {
 		return false
 	}
 
@@ -291,7 +292,7 @@ func validateStaticSpec(ingressController operatorv1.IngressController, desiredS
 func validatePatchableStatus(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) (bool, patchField) {
 	ingressControllerSelector, _ := metav1.ParseToLabelSelector(ingressController.Status.Selector)
 	if ingressControllerSelector != nil {
-		if !(desiredSpec.RouteSelector == ingressControllerSelector) {
+		if !(reflect.DeepEqual(desiredSpec.RouteSelector.MatchLabels, ingressControllerSelector.MatchLabels)) {
 			return false, IngressControllerSelector
 		}
 	} else {
@@ -304,11 +305,11 @@ func validatePatchableStatus(ingressController operatorv1.IngressController, des
 }
 
 func validatePatchableSpec(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) (bool, patchField) {
-	if !(desiredSpec.RouteSelector == ingressController.Spec.RouteSelector) {
+	if !(reflect.DeepEqual(desiredSpec.RouteSelector.MatchLabels, ingressController.Spec.RouteSelector.MatchLabels)) {
 		return false, IngressControllerSelector
 	}
 
-	if !(desiredSpec.DefaultCertificate == ingressController.Spec.DefaultCertificate) {
+	if !(desiredSpec.DefaultCertificate.Name == ingressController.Spec.DefaultCertificate.Name) {
 		return false, IngressControllerCertificate
 	}
 
