@@ -1,10 +1,8 @@
 package publishingstrategy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
@@ -35,6 +33,11 @@ const (
 
 var log = logf.Log.WithName("controller_publishingstrategy")
 var serializer = json.NewSerializerWithOptions(nil, nil, nil, json.SerializerOptions{})
+
+type patchField string
+
+var IngressControllerSelector patchField = "IngressControllerSelector"
+var IngressControllerCertificate patchField = "IngressControllerCertificate"
 
 /**
 * USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
@@ -110,12 +113,14 @@ func (r *ReconcilePublishingStrategy) Reconcile(request reconcile.Request) (reco
 
 		// Set the namespaced name
 		namespacedName := types.NamespacedName{Name: getIngressName(ingressDefinition.DNSName), Namespace: ingressControllerNamespace}
-		// Default
+		// Handle the "default" IngressController
 		if ingressDefinition.Default {
 			namespacedName = types.NamespacedName{Name: "default", Namespace: ingressControllerNamespace}
 		}
 
+		// Generate IngressController based on the applicationIngress definition
 		desiredIngressController := generateIngressController(ingressDefinition)
+
 		// Try to get matching IngressController
 		ingressController := &operatorv1.IngressController{}
 		err = r.client.Get(context.TODO(), namespacedName, ingressController)
@@ -132,20 +137,52 @@ func (r *ReconcilePublishingStrategy) Reconcile(request reconcile.Request) (reco
 			return reconcile.Result{}, err
 		}
 
-		// If the IngressController exists, ensure it matches PublishingStrategies definition
-		if !reflect.DeepEqual(ingressController.Spec, desiredIngressController.Spec) {
-			// Deafult is a special case, the matching data can also be in the status
+		// Check Spec fields that cannot be patched vs desired IngressController
+		if !validateStaticSpec(*ingressController, desiredIngressController.Spec) {
+			// "default" CR also needs a status check
 			if ingressDefinition.Default {
-				if checkDefaultIngressControllerStatus(*ingressController, desiredIngressController.Spec) {
-					continue
+				if !validateStaticStatus(*ingressController, desiredIngressController.Spec) {
+					//Delete IngressController as it doesn't match ApplicationIngress
+					r.client.Delete(context.TODO(), ingressController)
+					return reconcile.Result{Requeue: true}, nil
 				}
+			} else {
+				//Delete IngressController as it doesn't match ApplicationIngress
+				r.client.Delete(context.TODO(), ingressController)
+				return reconcile.Result{Requeue: true}, nil
 			}
-			// If the definitions aren't the same, delete the IngressController
-			err = r.client.Delete(context.TODO(), ingressController)
-			if err != nil {
-				return reconcile.Result{}, err
+		}
+
+		// Check Spec fields that CAN be patched vs desired IngressController
+		if valid, field := validatePatchableSpec(*ingressController, desiredIngressController.Spec); !valid {
+			baseToPatch := client.MergeFrom(ingressController.DeepCopy())
+			if ingressDefinition.Default {
+				if valid, field := validatePatchableStatus(*ingressController, desiredIngressController.Spec); valid {
+					// Patch CR
+					if field == IngressControllerSelector {
+						ingressController.Spec.RouteSelector = desiredIngressController.Spec.RouteSelector
+					} else if field == IngressControllerCertificate {
+						ingressController.Spec.DefaultCertificate = desiredIngressController.Spec.DefaultCertificate
+					}
+					err = r.client.Patch(context.TODO(), ingressController, baseToPatch)
+					if err != nil {
+						return reconcile.Result{}, err
+					}
+					return reconcile.Result{Requeue: true}, nil
+				}
+			} else {
+				// Patch CR
+				if field == IngressControllerSelector {
+					ingressController.Spec.RouteSelector = desiredIngressController.Spec.RouteSelector
+				} else if field == IngressControllerCertificate {
+					ingressController.Spec.DefaultCertificate = desiredIngressController.Spec.DefaultCertificate
+				}
+				err = r.client.Patch(context.TODO(), ingressController, baseToPatch)
+				if err != nil {
+					return reconcile.Result{}, err
+				}
+				return reconcile.Result{Requeue: true}, nil
 			}
-			return reconcile.Result{Requeue: true}, nil
 		}
 	}
 
@@ -228,7 +265,7 @@ func generateIngressController(appIngress v1alpha1.ApplicationIngress) *operator
 	}
 }
 
-func checkDefaultIngressControllerStatus(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) bool {
+func validateStaticStatus(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) bool {
 
 	if !(desiredSpec.Domain == ingressController.Status.Domain) {
 		return false
@@ -236,17 +273,44 @@ func checkDefaultIngressControllerStatus(ingressController operatorv1.IngressCon
 	if !(desiredSpec.EndpointPublishingStrategy == ingressController.Status.EndpointPublishingStrategy) {
 		return false
 	}
-	if !(mapToString(desiredSpec.RouteSelector.MatchLabels) == ingressController.Status.Selector) {
+
+	return true
+}
+
+func validateStaticSpec(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) bool {
+	if !(desiredSpec.Domain == ingressController.Spec.Domain) {
+		return false
+	}
+	if !(desiredSpec.EndpointPublishingStrategy == ingressController.Spec.EndpointPublishingStrategy) {
 		return false
 	}
 
 	return true
 }
 
-func mapToString(m map[string]string) string {
-	b := new(bytes.Buffer)
-	for key, value := range m {
-		fmt.Fprintf(b, "%s=\"%s\"\n", key, value)
+func validatePatchableStatus(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) (bool, patchField) {
+	ingressControllerSelector, _ := metav1.ParseToLabelSelector(ingressController.Status.Selector)
+	if ingressControllerSelector != nil {
+		if !(desiredSpec.RouteSelector == ingressControllerSelector) {
+			return false, IngressControllerSelector
+		}
+	} else {
+		if desiredSpec.RouteSelector != nil {
+			return false, IngressControllerSelector
+		}
 	}
-	return b.String()
+
+	return true, ""
+}
+
+func validatePatchableSpec(ingressController operatorv1.IngressController, desiredSpec operatorv1.IngressControllerSpec) (bool, patchField) {
+	if !(desiredSpec.RouteSelector == ingressController.Spec.RouteSelector) {
+		return false, IngressControllerSelector
+	}
+
+	if !(desiredSpec.DefaultCertificate == ingressController.Spec.DefaultCertificate) {
+		return false, IngressControllerCertificate
+	}
+
+	return true, ""
 }

@@ -217,6 +217,47 @@ func TestGetIngressName(t *testing.T) {
 	}
 }
 
+func TestGenerateIngressController(t *testing.T) {
+
+	// expected result
+	expected := &operatorv1.IngressController{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "apps3",
+			Namespace: "openshift-ingress-operator",
+		},
+		Spec: operatorv1.IngressControllerSpec{
+			DefaultCertificate: &corev1.LocalObjectReference{
+				Name: "example-cert-nondefault",
+			},
+			Domain: "example-domain-nondefault.example.com",
+			EndpointPublishingStrategy: &operatorv1.EndpointPublishingStrategy{
+				Type: operatorv1.LoadBalancerServiceStrategyType,
+				LoadBalancer: &operatorv1.LoadBalancerStrategy{
+					Scope: operatorv1.ExternalLoadBalancer,
+				},
+			},
+			RouteSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{},
+			},
+		},
+	}
+
+	applicationIngress := cloudingressv1alpha1.ApplicationIngress{
+		Listening:   "External",
+		Default:     false,
+		DNSName:     "example-domain-nondefault.example.com",
+		Certificate: corev1.SecretReference{Name: "example-cert-nondefault", Namespace: "openshift-ingress-operator"},
+	}
+
+	result := generateIngressController(applicationIngress)
+
+	// since these are pointers to different struct the pointer addresses are not the same, therefore reflect.DeepEqual won't work
+	// compare parts that we can
+	if result.Name != expected.Name && result.Spec.DefaultCertificate.Name != expected.Spec.DefaultCertificate.Name && result.Spec.Domain != expected.Spec.Domain {
+		t.Errorf("expected different ingresscontroller")
+	}
+}
+
 // create new fake k8s client to mock API calls
 func newTestReconciler() *ReconcilePublishingStrategy {
 	return &ReconcilePublishingStrategy{
