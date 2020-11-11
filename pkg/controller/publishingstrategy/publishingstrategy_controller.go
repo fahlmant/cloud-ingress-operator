@@ -138,6 +138,11 @@ func (r *ReconcilePublishingStrategy) Reconcile(request reconcile.Request) (reco
 			return reconcile.Result{}, err
 		}
 
+		// Let an IngressController with a deletion timestamp delete
+		if !ingressController.DeletionTimestamp.IsZero() {
+			return reconcile.Result{Requeue: true}, nil
+		}
+
 		// Check Spec fields that cannot be patched vs desired IngressController
 		if !validateStaticSpec(*ingressController, desiredIngressController.Spec) {
 			// "default" CR also needs a status check
