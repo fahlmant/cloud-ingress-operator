@@ -261,7 +261,7 @@ rolekind_csvkey_bindingmap = (
     # NOTE: The schema supports `permissions` for Roles, but OLM may not. For
     # backward compatibility, treat Roles and RoleBindings as generic bundle
     # resources.
-    # ('Role', 'permissions', rb_by_role),
+    ('Role', 'permissions', rb_by_role),
 )
 for kind, csvkey, binding_map in rolekind_csvkey_bindingmap:
     if kind in by_kind:
@@ -284,7 +284,7 @@ for kind, csvkey, binding_map in rolekind_csvkey_bindingmap:
     trim_index(by_kind, kind, 'ALL')
 
 
-csv['spec']['install']['spec']['permissions'] = []
+#csv['spec']['install']['spec']['permissions'] = []
 
 if 'namespace' not in csv['metadata']:
     raise UndefinedCSVNamespace(OPERATOR_NAME)
@@ -303,7 +303,7 @@ if 'Role' in by_kind:
         # we add it to CSV and remove it from the by_kind dict
         if len(role_binding['subjects']) == 1 and \
             role_binding['subjects'][0]['kind'] == 'ServiceAccount' and \
-            role_binding['subjects'][0].get('namespace', namespace) == namespace:
+            role_binding['subjects'][0].get('namespace', namespace) == namespace:--skip-broken
                 csv['spec']['install']['spec']['permissions'].append(
                     {
                         'rules': role['rules'],
