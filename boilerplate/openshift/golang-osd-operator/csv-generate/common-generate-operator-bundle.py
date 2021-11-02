@@ -303,7 +303,7 @@ if 'Role' in by_kind:
         # we add it to CSV and remove it from the by_kind dict
         if len(role_binding['subjects']) == 1 and \
             role_binding['subjects'][0]['kind'] == 'ServiceAccount' and \
-            role_binding['subjects'][0].get('namespace', namespace) == namespace:--skip-broken
+            role_binding['subjects'][0].get('namespace', namespace) == namespace:
                 csv['spec']['install']['spec']['permissions'].append(
                     {
                         'rules': role['rules'],
